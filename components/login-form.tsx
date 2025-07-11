@@ -3,17 +3,18 @@
 import type React from "react"
 
 import { useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Eye, EyeOff, LogIn } from "lucide-react"
-import { login } from "../utils/auth"
-import type { LoginCredentials, User } from "../types/user"
+import { Badge } from "@/components/ui/badge"
+import { LogIn, Eye, EyeOff } from "lucide-react"
+import type { User } from "../types/user"
+import type { LoginCredentials } from "../types/auth"
 
 interface LoginFormProps {
-  onLogin: (user: User) => void
+  onLogin: (credentials: LoginCredentials) => Promise<User | null>
 }
 
 export function LoginForm({ onLogin }: LoginFormProps) {
@@ -21,9 +22,9 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     username: "",
     password: "",
   })
-  const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -31,11 +32,9 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     setError("")
 
     try {
-      const user = login(credentials)
-      if (user) {
-        onLogin(user)
-      } else {
-        setError("Invalid username/email or password")
+      const user = await onLogin(credentials)
+      if (!user) {
+        setError("Invalid username or password")
       }
     } catch (error) {
       setError("An error occurred during login")
@@ -44,90 +43,100 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     }
   }
 
-  const handleInputChange = (field: keyof LoginCredentials, value: string) => {
-    setCredentials((prev) => ({ ...prev, [field]: value }))
-    if (error) setError("")
+  const handleDemoLogin = () => {
+    setCredentials({
+      username: "admin",
+      password: "Admin123!",
+    })
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
-          <CardDescription>Sign in to your Payment Processing Proposal Generator account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="username">Username or Email</Label>
-              <Input
-                id="username"
-                type="text"
-                value={credentials.username}
-                onChange={(e) => handleInputChange("username", e.target.value)}
-                placeholder="Enter your username or email"
-                required
-              />
-            </div>
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+      <div className="w-full max-w-md space-y-6">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold">Payment Processing</h1>
+          <p className="text-muted-foreground">Proposal Generator</p>
+        </div>
 
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <LogIn className="h-5 w-5" />
+              Sign In
+            </CardTitle>
+            <CardDescription>Enter your credentials to access the application</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Username or Email</Label>
                 <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={credentials.password}
-                  onChange={(e) => handleInputChange("password", e.target.value)}
-                  placeholder="Enter your password"
+                  id="username"
+                  type="text"
+                  value={credentials.username}
+                  onChange={(e) => setCredentials({ ...credentials, username: e.target.value })}
                   required
+                  disabled={isLoading}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={credentials.password}
+                    onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+                    required
+                    disabled={isLoading}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                    onClick={() => setShowPassword(!showPassword)}
+                    disabled={isLoading}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              {error && (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              <Button type="submit" className="w-full" disabled={isLoading}>
+                {isLoading ? "Signing in..." : "Sign In"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Demo Credentials</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Administrator</p>
+                <p className="text-xs text-muted-foreground">admin / Admin123!</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="default">Admin</Badge>
+                <Button size="sm" variant="outline" onClick={handleDemoLogin} disabled={isLoading}>
+                  Use
                 </Button>
               </div>
             </div>
-
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-
-            <Button type="submit" className="w-full" disabled={isLoading}>
-              {isLoading ? (
-                "Signing in..."
-              ) : (
-                <>
-                  <LogIn className="h-4 w-4 mr-2" />
-                  Sign In
-                </>
-              )}
-            </Button>
-          </form>
-
-          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <h4 className="font-semibold text-blue-900 mb-2">Default Admin Credentials:</h4>
-            <div className="text-sm text-blue-800 space-y-1">
-              <div>
-                <strong>Username:</strong> admin
-              </div>
-              <div>
-                <strong>Email:</strong> admin@transferglobal.com
-              </div>
-              <div>
-                <strong>Password:</strong> Admin123!
-              </div>
-            </div>
-            <p className="text-xs text-blue-600 mt-2">Use these credentials to log in and create additional users.</p>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }
