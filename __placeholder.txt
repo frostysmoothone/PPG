@@ -1,0 +1,2 @@
+This file exists only to ensure the CodeProject is non-empty.
+You can delete it later; it is not used by the app.
