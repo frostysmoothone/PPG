@@ -1,5 +1,11 @@
-import PDFGenerator from "../components/pdf-generator"
+import AppLayout from "../components/app-layout"
+import { Toaster } from "@/components/ui/toaster"
 
 export default function Home() {
-  return <PDFGenerator />
+  return (
+    <>
+      <AppLayout />
+      <Toaster />
+    </>
+  )
 }

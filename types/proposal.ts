@@ -46,3 +46,11 @@ export interface ProposalData {
   additionalFees: AdditionalFee[]
   settlementTerms: SettlementTerms
 }
+
+export interface SavedProposal {
+  id: string
+  name: string
+  data: ProposalData
+  createdAt: string
+  updatedAt: string
+}

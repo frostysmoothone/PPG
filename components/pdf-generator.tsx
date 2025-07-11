@@ -13,9 +13,13 @@ import { FeeTable } from "./fee-table"
 import { AdditionalFeesTable } from "./additional-fees-table"
 import { SettlementSection } from "./settlement-section"
 import { PDFPreview } from "./pdf-preview"
+import { SaveProposalDialog } from "./save-proposal-dialog"
+import { SavedProposalsDialog } from "./saved-proposals-dialog"
 import { generatePDF } from "../utils/pdf-generator"
-import type { ProposalData, CardFee, AdditionalFee } from "../types/proposal"
-import { FileText, Eye, EyeOff } from "lucide-react"
+import { saveProposal } from "../utils/proposal-storage"
+import type { ProposalData, CardFee, AdditionalFee, SavedProposal } from "../types/proposal"
+import { FileText, Eye, EyeOff, RotateCcw } from "lucide-react"
+import { useToast } from "@/hooks/use-toast"
 
 const defaultCardFees: CardFee[] = [
   { cardType: "VISA", enabled: true, percentageFee: 2.9, fixedFee: 0.3, currency: "USD" },
@@ -37,30 +41,35 @@ const defaultAdditionalFees: AdditionalFee[] = [
   { feeType: "Reserve", enabled: false, percentageFee: 10, fixedFee: 0, currency: "USD", days: 180 },
 ]
 
+const getDefaultProposalData = (): ProposalData => ({
+  companyLogo: "/linx-logo.png",
+  companyName: "Transfer Global Inc.",
+  companyAddress: "2135 De la Montagnes\nMontreal, QC, H3G 1Z8",
+  companyPhone: "",
+  companyEmail: "finance@linx.fi",
+  clientName: "",
+  clientCompany: "",
+  clientAddress: "",
+  clientEmail: "",
+  proposalDate: new Date().toISOString().split("T")[0],
+  validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
+  cardFees: defaultCardFees,
+  additionalFees: defaultAdditionalFees,
+  settlementTerms: {
+    settlementPeriod: "T+2 Business Days",
+    settlementFee: 0,
+    settlementCurrency: "USD",
+    minimumSettlement: 0,
+  },
+})
+
 export default function PDFGenerator() {
   const [showPreview, setShowPreview] = useState(false)
   const [logoDataUrl, setLogoDataUrl] = useState<string>("")
-  const [proposalData, setProposalData] = useState<ProposalData>({
-    companyLogo: "/linx-logo.png",
-    companyName: "Transfer Global Inc.",
-    companyAddress: "2135 De la Montagnes\nMontreal, QC, H3G 1Z8",
-    companyPhone: "",
-    companyEmail: "finance@linx.fi",
-    clientName: "",
-    clientCompany: "",
-    clientAddress: "",
-    clientEmail: "",
-    proposalDate: new Date().toISOString().split("T")[0],
-    validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    cardFees: defaultCardFees,
-    additionalFees: defaultAdditionalFees,
-    settlementTerms: {
-      settlementPeriod: "T+2 Business Days",
-      settlementFee: 0,
-      settlementCurrency: "USD",
-      minimumSettlement: 0,
-    },
-  })
+  const [proposalData, setProposalData] = useState<ProposalData>(getDefaultProposalData())
+  const [currentProposalId, setCurrentProposalId] = useState<string | null>(null)
+  const [currentProposalName, setCurrentProposalName] = useState<string>("")
+  const { toast } = useToast()
 
   // Convert default logo to data URL on component mount
   useEffect(() => {
@@ -100,6 +109,51 @@ export default function PDFGenerator() {
     }
   }
 
+  const handleSaveProposal = (name: string) => {
+    try {
+      const saved = saveProposal(name, proposalData, currentProposalId || undefined)
+      setCurrentProposalId(saved.id)
+      setCurrentProposalName(saved.name)
+      toast({
+        title: "Proposal Saved",
+        description: `"${name}" has been saved successfully.`,
+      })
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to save proposal. Please try again.",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleLoadProposal = (proposal: SavedProposal) => {
+    setProposalData(proposal.data)
+    setCurrentProposalId(proposal.id)
+    setCurrentProposalName(proposal.name)
+    if (proposal.data.companyLogo) {
+      setLogoDataUrl(proposal.data.companyLogo)
+    }
+    toast({
+      title: "Proposal Loaded",
+      description: `"${proposal.name}" has been loaded.`,
+    })
+  }
+
+  const handleNewProposal = () => {
+    setProposalData(getDefaultProposalData())
+    setCurrentProposalId(null)
+    setCurrentProposalName("")
+    // Reset logo to default
+    if (logoDataUrl && logoDataUrl.startsWith("data:")) {
+      setProposalData((prev) => ({ ...prev, companyLogo: logoDataUrl }))
+    }
+    toast({
+      title: "New Proposal",
+      description: "Started a new proposal.",
+    })
+  }
+
   const handleGeneratePDF = () => {
     generatePDF(proposalData)
   }
@@ -111,8 +165,22 @@ export default function PDFGenerator() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Payment Processing Proposal Generator</h1>
             <p className="text-gray-600">Create professional pricing proposals for payment processing services</p>
+            {currentProposalName && (
+              <p className="text-sm text-blue-600 mt-1">Currently editing: {currentProposalName}</p>
+            )}
           </div>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={handleNewProposal} className="flex items-center gap-2 bg-transparent">
+              <RotateCcw className="h-4 w-4" />
+              New
+            </Button>
+            <SavedProposalsDialog onLoadProposal={handleLoadProposal} />
+            <SaveProposalDialog
+              proposalData={proposalData}
+              onSave={handleSaveProposal}
+              currentName={currentProposalName}
+              isEditing={!!currentProposalId}
+            />
             <Button variant="outline" onClick={() => setShowPreview(!showPreview)} className="flex items-center gap-2">
               {showPreview ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               {showPreview ? "Hide Preview" : "Show Preview"}
