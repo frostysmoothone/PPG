@@ -118,8 +118,8 @@ export default function PDFGenerator() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-6">
+      <div className={`grid gap-6 ${showPreview ? "grid-cols-1 lg:grid-cols-2" : "grid-cols-1"}`}>
+        <div className={`space-y-6 ${!showPreview ? "max-w-4xl mx-auto" : ""}`}>
           <Tabs defaultValue="company" className="w-full">
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="company">Company</TabsTrigger>
