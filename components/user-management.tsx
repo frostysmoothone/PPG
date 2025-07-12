@@ -54,8 +54,10 @@ export function UserManagement({ currentUser }: UserManagementProps) {
   const { toast } = useToast()
 
   useEffect(() => {
-    loadUsers()
-  }, [])
+    if (currentUser.role === "admin") {
+      loadUsers()
+    }
+  }, [currentUser.role])
 
   const loadUsers = async () => {
     const usersList = await getUsers()
@@ -72,18 +74,19 @@ export function UserManagement({ currentUser }: UserManagementProps) {
     const errors: string[] = []
     const data = isEditing ? editFormData : formData
 
-    if (!data.username?.trim()) errors.push("Username is required")
-    else if (data.username.length < 3) errors.push("Username must be at least 3 characters long")
+    if (!isEditing) {
+      if (!data.username?.trim()) errors.push("Username is required")
+      else if (data.username.length < 3) errors.push("Username must be at least 3 characters long")
 
-    if (!data.email?.trim()) errors.push("Email is required")
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errors.push("Please enter a valid email address")
+      if (!data.email?.trim()) errors.push("Email is required")
+      else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) errors.push("Please enter a valid email address")
 
-    if (!isEditing && !data.password) {
-      errors.push("Password is required for new users.")
-    }
-    if (data.password) {
-      const passwordErrors = validatePassword(data.password)
-      errors.push(...passwordErrors)
+      if (!data.password) {
+        errors.push("Password is required for new users.")
+      } else {
+        const passwordErrors = validatePassword(data.password)
+        errors.push(...passwordErrors)
+      }
     }
 
     setFormErrors(errors)
@@ -94,18 +97,18 @@ export function UserManagement({ currentUser }: UserManagementProps) {
     if (!validateForm()) return
 
     const newUser = await createUser(formData)
-    if (newUser) {
+    if (newUser && newUser.id) {
       await loadUsers()
       setShowCreateDialog(false)
       resetForm()
       toast({ title: "User Created", description: `User "${newUser.username}" has been created.` })
     } else {
-      setFormErrors(["Username or email already exists"])
+      toast({ title: "Creation Failed", description: "Please check the console for errors.", variant: "destructive" })
     }
   }
 
   const handleUpdateUser = async () => {
-    if (!editingUser || !validateForm(true)) return
+    if (!editingUser) return
 
     const updatedUser = await updateUser(editingUser.id, editFormData)
     if (updatedUser) {
@@ -114,7 +117,7 @@ export function UserManagement({ currentUser }: UserManagementProps) {
       setEditFormData({})
       toast({ title: "User Updated", description: `User "${updatedUser.username}" has been updated.` })
     } else {
-      setFormErrors(["Failed to update user"])
+      toast({ title: "Update Failed", description: "Could not update user role.", variant: "destructive" })
     }
   }
 
@@ -137,29 +140,9 @@ export function UserManagement({ currentUser }: UserManagementProps) {
   const handleEditClick = (user: User) => {
     setEditingUser(user)
     setEditFormData({
-      username: user.username,
-      email: user.email,
       role: user.role,
-      isActive: user.isActive,
-      password: "",
     })
     setFormErrors([])
-  }
-
-  const toggleUserStatus = async (user: User) => {
-    if (user.id === currentUser.id) {
-      toast({ title: "Error", description: "You cannot deactivate your own account.", variant: "destructive" })
-      return
-    }
-
-    const updatedUser = await updateUser(user.id, { isActive: !user.isActive })
-    if (updatedUser) {
-      await loadUsers()
-      toast({
-        title: "User Status Updated",
-        description: `User "${user.username}" has been ${updatedUser.isActive ? "activated" : "deactivated"}.`,
-      })
-    }
   }
 
   const formatDate = (dateString: string) => {
@@ -167,8 +150,6 @@ export function UserManagement({ currentUser }: UserManagementProps) {
       year: "numeric",
       month: "short",
       day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
     })
   }
 
@@ -312,25 +293,18 @@ export function UserManagement({ currentUser }: UserManagementProps) {
                       <div className="flex items-center space-x-2">
                         <h4 className="font-medium">{user.username}</h4>
                         <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role}</Badge>
-                        <Badge variant={user.isActive ? "default" : "destructive"}>
-                          {user.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                        {user.id === currentUser.id && <Badge variant="outline">You</Badge>}
                       </div>
                       <p className="text-sm text-muted-foreground">{user.email}</p>
-                      <p className="text-xs text-muted-foreground">Created: {formatDate(user.createdAt)}</p>
+                      <p className="text-xs text-muted-foreground">Joined: {formatDate(user.createdAt)}</p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => toggleUserStatus(user)}
+                      onClick={() => handleEditClick(user)}
                       disabled={user.id === currentUser.id}
                     >
-                      {user.isActive ? "Deactivate" : "Activate"}
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleEditClick(user)}>
                       <Edit className="h-3 w-3" />
                     </Button>
                     <Button
@@ -353,56 +327,10 @@ export function UserManagement({ currentUser }: UserManagementProps) {
       <Dialog open={!!editingUser} onOpenChange={() => setEditingUser(null)}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Edit User</DialogTitle>
-            <DialogDescription>Update user info. Leave password empty to keep current password.</DialogDescription>
+            <DialogTitle>Edit User Role</DialogTitle>
+            <DialogDescription>Change the role for {editingUser?.username}.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="username-edit" className="text-right">
-                Username
-              </Label>
-              <Input
-                id="username-edit"
-                value={editFormData.username}
-                onChange={(e) => setEditFormData({ ...editFormData, username: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="email-edit" className="text-right">
-                Email
-              </Label>
-              <Input
-                id="email-edit"
-                type="email"
-                value={editFormData.email}
-                onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="password-edit" className="text-right">
-                Password
-              </Label>
-              <div className="col-span-3 relative">
-                <Input
-                  id="password-edit"
-                  type={showPassword ? "text" : "password"}
-                  value={editFormData.password}
-                  onChange={(e) => setEditFormData({ ...editFormData, password: e.target.value })}
-                  placeholder="Leave empty to keep current"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-            </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="role-edit" className="text-right">
                 Role
@@ -420,24 +348,13 @@ export function UserManagement({ currentUser }: UserManagementProps) {
                 </SelectContent>
               </Select>
             </div>
-            {formErrors.length > 0 && (
-              <Alert variant="destructive">
-                <AlertDescription>
-                  <ul className="list-disc list-inside space-y-1">
-                    {formErrors.map((error, index) => (
-                      <li key={index}>{error}</li>
-                    ))}
-                  </ul>
-                </AlertDescription>
-              </Alert>
-            )}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setEditingUser(null)}>
               Cancel
             </Button>
             <Button type="button" onClick={handleUpdateUser}>
-              Update User
+              Update Role
             </Button>
           </DialogFooter>
         </DialogContent>

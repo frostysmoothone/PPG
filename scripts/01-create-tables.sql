@@ -1,14 +1,14 @@
 -- USERS --------------------------------------------------------------
 DROP TABLE IF EXISTS public.users CASCADE;
 CREATE TABLE public.users (
-  id             uuid primary key DEFAULT extensions.uuid_generate_v4(),
-  username       text unique not null,
-  email          text unique not null,
-  password_hash  text not null,
-  role           text not null default 'user',
-  is_active      boolean not null default true,
-  created_at     timestamptz not null default now(),
-  updated_at     timestamptz not null default now()
+    id UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+    username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Automatically keep updated_at current
@@ -28,12 +28,13 @@ for each row execute function public.touch_users_updated_at();
 -- USER_SESSIONS ------------------------------------------------------
 DROP TABLE IF EXISTS public.user_sessions CASCADE;
 CREATE TABLE public.user_sessions (
-  id            uuid primary key default extensions.uuid_generate_v4(),
-  user_id       uuid not null references public.users(id) on delete cascade,
-  session_token text unique not null,
-  expires_at    timestamptz not null,
-  created_at    timestamptz not null default now()
+    id UUID PRIMARY KEY DEFAULT extensions.uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    session_token TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Create an index on user_id for faster session lookups.
+-- Create indexes for faster lookups.
 CREATE INDEX idx_user_sessions_user_id ON public.user_sessions(user_id);
+CREATE INDEX idx_user_sessions_session_token ON public.user_sessions(session_token);

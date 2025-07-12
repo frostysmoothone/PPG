@@ -1,128 +1,156 @@
 import { supabase } from "../lib/supabase"
 import type { User, LoginCredentials, CreateUserData } from "../types/user"
 
-function dbUserToAppUser(dbUser: any): User {
+// This maps the user data from Supabase Auth and our public.profiles table
+// into the User type used by the application.
+function a(user: any, profile: any): User {
   return {
-    id: dbUser.id,
-    username: dbUser.username,
-    email: dbUser.email,
-    password: "", // Never return password
-    role: dbUser.role,
-    createdAt: dbUser.created_at,
-    updatedAt: dbUser.updated_at,
-    isActive: dbUser.is_active,
+    id: user.id,
+    email: user.email,
+    username: profile?.username || "",
+    role: profile?.role || "user",
+    createdAt: user.created_at,
+    updatedAt: profile?.updated_at || user.created_at,
+    isActive: true, // Supabase Auth handles this via email confirmation, etc.
+    password: "", // Never handle passwords on the client
   }
 }
 
 export async function loginUser(credentials: LoginCredentials): Promise<User | null> {
-  try {
-    const { data, error } = await supabase.rpc("handle_login", {
-      p_username_or_email: credentials.username,
-      p_password: credentials.password,
-    })
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: credentials.username, // Use email for login
+    password: credentials.password,
+  })
 
-    if (error || !data) {
-      console.error("Login failed:", error?.message || "Invalid credentials.")
-      return null
-    }
-
-    const { user: rpcUser, session_token } = data
-    localStorage.setItem("session_token", session_token)
-    localStorage.setItem("current_user", JSON.stringify(rpcUser))
-
-    return rpcUser as User
-  } catch (e) {
-    console.error("An unexpected error occurred during login:", e)
+  if (error || !data.user) {
+    console.error("Login failed:", error?.message)
     return null
   }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", data.user.id)
+    .single()
+
+  if (profileError) {
+    console.error("Failed to fetch user profile:", profileError.message)
+    return null
+  }
+
+  return a(data.user, profile)
 }
 
 export async function logoutUser(): Promise<void> {
-  const sessionToken = localStorage.getItem("session_token")
-  if (sessionToken) {
-    try {
-      await supabase.rpc("handle_logout", { p_session_token: sessionToken })
-    } catch (error) {
-      console.error("Logout RPC failed:", error)
-    }
-  }
-  localStorage.removeItem("session_token")
-  localStorage.removeItem("current_user")
+  await supabase.auth.signOut()
 }
 
 export async function getCurrentUser(): Promise<User | null> {
-  const sessionToken = localStorage.getItem("session_token")
-  const storedUser = localStorage.getItem("current_user")
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession()
 
-  if (!sessionToken || !storedUser) {
+  if (sessionError || !session) {
     return null
   }
 
-  try {
-    const { data: user, error } = await supabase.rpc("verify_session", {
-      p_session_token: sessionToken,
-    })
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", session.user.id)
+    .single()
 
-    if (error || !user) {
-      localStorage.removeItem("session_token")
-      localStorage.removeItem("current_user")
-      return null
-    }
-
-    // Re-store user data to keep it fresh
-    localStorage.setItem("current_user", JSON.stringify(user))
-    return user as User
-  } catch (e) {
-    console.error("Get current user error:", e)
+  if (profileError) {
     return null
   }
+
+  return a(session.user, profile)
 }
 
 export async function getUsers(): Promise<User[]> {
-  try {
-    const { data, error } = await supabase.rpc("get_all_users")
-    if (error) throw error
-    return data.map(dbUserToAppUser)
-  } catch (error) {
-    console.error("Error fetching users:", error)
+  const { data, error } = await supabase.rpc("get_all_users")
+
+  if (error) {
+    console.error("Error fetching users:", error.message)
     return []
   }
+
+  // The RPC returns a combined view of auth.users and public.profiles
+  return data.map((user) => ({
+    id: user.id,
+    email: user.email,
+    username: user.username,
+    role: user.role,
+    createdAt: user.created_at,
+    updatedAt: user.created_at, // Simplified for this example
+    isActive: true,
+    password: "",
+  }))
 }
 
 export async function createUser(userData: CreateUserData): Promise<User | null> {
-  try {
-    const { data, error } = await supabase.rpc("create_new_user", { p_user_data: userData })
-    if (error) throw error
-    return dbUserToAppUser(data)
-  } catch (error) {
-    console.error("Error creating user:", error)
+  // Use the admin client to create users without requiring email confirmation for this demo.
+  // In a real app, you'd handle this differently.
+  const { data, error } = await supabase.auth.signUp({
+    email: userData.email,
+    password: userData.password,
+    options: {
+      data: {
+        username: userData.username,
+        role: userData.role,
+      },
+    },
+  })
+
+  if (error || !data.user) {
+    console.error("Error creating user:", error?.message)
     return null
   }
+
+  // The trigger `on_auth_user_created` will create the profile.
+  // We just need to fetch it to return the full User object.
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", data.user.id)
+    .single()
+
+  if (profileError) {
+    console.error("Failed to fetch new user's profile:", profileError.message)
+    return null
+  }
+
+  return a(data.user, profile)
 }
 
 export async function updateUser(userId: string, updates: Partial<User>): Promise<User | null> {
-  try {
-    const { data, error } = await supabase.rpc("update_user_details", {
+  if (updates.role) {
+    const { error } = await supabase.rpc("update_user_role", {
       p_user_id: userId,
-      p_updates: updates,
+      p_new_role: updates.role,
     })
-    if (error) throw error
-    return dbUserToAppUser(data)
-  } catch (error) {
-    console.error("Error updating user:", error)
-    return null
+    if (error) {
+      console.error("Error updating user role:", error.message)
+      return null
+    }
   }
+  // Fetch the updated user data to return it
+  const { data: user, error: userError } = await supabase.auth.admin.getUserById(userId)
+  if (userError) return null
+  const { data: profile, error: profileError } = await supabase.from("profiles").select("*").eq("id", userId).single()
+  if (profileError) return null
+
+  return a(user.user, profile)
 }
 
 export async function deleteUser(userId: string): Promise<boolean> {
-  try {
-    const { data, error } = await supabase.rpc("delete_user_by_id", { p_user_id: userId })
-    if (error) throw error
-    return data
-  } catch (error) {
-    console.error("Error deleting user:", error)
+  const { error } = await supabase.rpc("delete_user_by_id", { p_user_id: userId })
+  if (error) {
+    console.error("Error deleting user:", error.message)
     return false
   }
+  return true
 }
 
 export function validatePassword(password: string): string[] {
