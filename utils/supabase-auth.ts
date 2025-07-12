@@ -17,28 +17,60 @@ function a(user: any, profile: any): User {
 }
 
 export async function loginUser(credentials: LoginCredentials): Promise<User | null> {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: credentials.username, // Use email for login
-    password: credentials.password,
-  })
+  try {
+    // 1️⃣  Resolve email if the user entered a username
+    let email = credentials.username.trim()
+    if (!email.includes("@")) {
+      // Treat input as username
+      const { data: profile, error: profileErr } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("username", email)
+        .single()
 
-  if (error || !data.user) {
-    console.error("Login failed:", error?.message)
+      if (profileErr || !profile) {
+        console.error("Login failed: username not found")
+        return null
+      }
+
+      // Fetch the auth.users record to get the email
+      const { data: userRes, error: userErr } = await supabase.auth.admin.getUserById(profile.id)
+
+      if (userErr || !userRes?.user?.email) {
+        console.error("Login failed: could not resolve email for username")
+        return null
+      }
+      email = userRes.user.email
+    }
+
+    // 2️⃣  Sign-in with the resolved email
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: credentials.password,
+    })
+
+    if (error || !data.user) {
+      console.error("Login failed:", error?.message || "Invalid login credentials")
+      return null
+    }
+
+    // 3️⃣  Fetch the user’s profile row
+    const { data: profile, error: profileErr } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", data.user.id)
+      .single()
+
+    if (profileErr) {
+      console.error("Login failed: could not load profile")
+      return null
+    }
+
+    return a(data.user, profile)
+  } catch (err) {
+    console.error("Unexpected login error:", err)
     return null
   }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", data.user.id)
-    .single()
-
-  if (profileError) {
-    console.error("Failed to fetch user profile:", profileError.message)
-    return null
-  }
-
-  return a(data.user, profile)
 }
 
 export async function logoutUser(): Promise<void> {
