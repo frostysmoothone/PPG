@@ -1,10 +1,13 @@
-import { supabase } from "../lib/supabase"
-import type { User as AppUser, LoginCredentials, CreateUserData } from "../types/user"
+import { createClient } from "@supabase/supabase-js"
+import type { User as AppUser, CreateUserData } from "../types/user"
 
-/* ------------------------------------------------------------------ */
-/* Helpers                                                            */
-/* ------------------------------------------------------------------ */
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string
+const supabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string
 
+/* Singleton consumer-side Supabase client */
+const supabase = createClient(supabaseUrl, supabaseAnon)
+
+/* ───────────────────────── helpers ──────────────────────────────── */
 function mapUser(authUser: any, profile: any): AppUser {
   return {
     id: authUser.id,
@@ -14,51 +17,38 @@ function mapUser(authUser: any, profile: any): AppUser {
     createdAt: authUser.created_at,
     updatedAt: profile?.updated_at ?? authUser.created_at,
     isActive: true,
-    password: "", // never expose passwords
+    password: "",
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Auth                                                               */
-/* ------------------------------------------------------------------ */
+/* ───────────────────────── Auth APIs ────────────────────────────── */
+export async function loginUser({
+  username,
+  password,
+}: {
+  username: string
+  password: string
+}): Promise<AppUser | null> {
+  if (!username || !password) return null
 
-export async function loginUser(credentials: LoginCredentials): Promise<AppUser | null> {
-  try {
-    let email = credentials.username.trim()
+  /* Supabase compares the bcrypt hash server-side */
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: username, // we now insist on e-mail sign-in
+    password,
+  })
 
-    /* 1️⃣  If the input is not an email, treat it as a username and
-       resolve the corresponding email from public.profiles.           */
-    if (!email.includes("@")) {
-      const { data: profile } = await supabase.from("profiles").select("id").eq("username", email).single()
-
-      if (profile?.id) {
-        const { data: authUser } = await supabase.auth.admin.getUserById(profile.id)
-        if (authUser?.user?.email) email = authUser.user.email
-      }
-      // If no profile row, we'll still try sign-in with the original string
-    }
-
-    /* 2️⃣  Attempt sign-in with Supabase Auth */
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password: credentials.password,
-    })
-    if (error || !data.user) {
-      console.error("Login failed:", error?.message ?? "Invalid credentials")
-      return null
-    }
-
-    /* 3️⃣  Load profile row */
-    const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single()
-
-    return mapUser(data.user, profile)
-  } catch (err) {
-    console.error("Unexpected login error:", err)
+  if (error) {
+    console.error("Supabase sign-in error:", error.message)
     return null
   }
+
+  /* Fetch matching profile row */
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", data.user.id).single()
+
+  return mapUser(data.user, profile)
 }
 
-export async function logoutUser(): Promise<void> {
+export async function logoutUser() {
   await supabase.auth.signOut()
 }
 
@@ -73,10 +63,7 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   return mapUser(session.user, profile)
 }
 
-/* ------------------------------------------------------------------ */
-/* User CRUD (admin only)                                             */
-/* ------------------------------------------------------------------ */
-
+/* ───────────────────────── Admin RPC wrappers ───────────────────── */
 export async function getUsers(): Promise<AppUser[]> {
   const { data, error } = await supabase.rpc("get_all_users")
   if (error) {
@@ -95,18 +82,11 @@ export async function getUsers(): Promise<AppUser[]> {
   }))
 }
 
-export async function createUser(userData: CreateUserData): Promise<AppUser | null> {
-  /* For demo purposes we use signUp (email/password). In production you’d
-     likely call supabase.auth.admin.createUser with the Service Key.      */
+export async function createUser({ email, password, username, role }: CreateUserData): Promise<AppUser | null> {
   const { data, error } = await supabase.auth.signUp({
-    email: userData.email,
-    password: userData.password,
-    options: {
-      data: {
-        username: userData.username,
-        role: userData.role,
-      },
-    },
+    email,
+    password,
+    options: { data: { username, role } },
   })
   if (error || !data.user) {
     console.error("Error creating user:", error?.message)
@@ -118,10 +98,10 @@ export async function createUser(userData: CreateUserData): Promise<AppUser | nu
   return mapUser(data.user, profile)
 }
 
-export async function updateUser(userId: string, updates: Partial<AppUser>): Promise<AppUser | null> {
+export async function updateUser(id: string, updates: Partial<AppUser>): Promise<AppUser | null> {
   if (updates.role) {
     const { error } = await supabase.rpc("update_user_role", {
-      p_user_id: userId,
+      p_user_id: id,
       p_new_role: updates.role,
     })
     if (error) {
@@ -130,33 +110,30 @@ export async function updateUser(userId: string, updates: Partial<AppUser>): Pro
     }
   }
 
-  const { data: authUser } = await supabase.auth.admin.getUserById(userId)
-  const { data: profile } = await supabase.from("profiles").select("*").eq("id", userId).single()
+  const { data: authUser } = await supabase.auth.admin.getUserById(id)
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", id).single()
 
   return authUser?.user ? mapUser(authUser.user, profile) : null
 }
 
-export async function deleteUser(userId: string): Promise<boolean> {
+export async function deleteUser(id: string) {
   const { error } = await supabase.rpc("delete_user_by_id", {
-    p_user_id: userId,
+    p_user_id: id,
   })
-  if (error) {
-    console.error("Error deleting user:", error.message)
-    return false
-  }
-  return true
+  if (error) console.error("Delete user error:", error.message)
+  return !error
 }
 
-/* ------------------------------------------------------------------ */
-/* Utilities                                                          */
-/* ------------------------------------------------------------------ */
-
-export function validatePassword(password: string): string[] {
-  const errors: string[] = []
-  if (password.length < 8) errors.push("Password must be at least 8 characters long.")
-  if (!/[A-Z]/.test(password)) errors.push("Password must contain at least one uppercase letter.")
-  if (!/[a-z]/.test(password)) errors.push("Password must contain at least one lowercase letter.")
-  if (!/\d/.test(password)) errors.push("Password must contain at least one number.")
-  if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) errors.push("Password must contain at least one special character.")
-  return errors
+/* ───────────────────────── Password helper ──────────────────────── */
+export function validatePassword(pw: string) {
+  const errs: string[] = []
+  if (pw.length < 8) errs.push("≥ 8 characters")
+  if (!/[A-Z]/.test(pw)) errs.push("1 uppercase")
+  if (!/[a-z]/.test(pw)) errs.push("1 lowercase")
+  if (!/\d/.test(pw)) errs.push("1 number")
+  if (!/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]/.test(pw)) errs.push("1 special character")
+  return errs
 }
+
+/* Re-export supabase if other utilities need it */
+export { supabase }
