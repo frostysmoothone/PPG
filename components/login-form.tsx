@@ -1,85 +1,94 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
-import { loginUser } from "../utils/supabase-auth"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+import type React from "react"
+
+import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { LogIn, Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff, LogIn } from 'lucide-react'
+import { login } from "../utils/auth"
+import type { LoginCredentials, User } from "../types/user"
 
-export function LoginForm() {
-  const [identifier, setIdentifier] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [showPw, setShowPw] = useState(false)
+interface LoginFormProps {
+  onLogin: (user: User) => void
+}
 
-  async function handleSubmit(e: FormEvent) {
+export function LoginForm({ onLogin }: LoginFormProps) {
+  const [credentials, setCredentials] = useState<LoginCredentials>({
+    username: "",
+    password: "",
+  })
+  const [showPassword, setShowPassword] = useState(false)
+  const [error, setError] = useState("")
+  const [isLoading, setIsLoading] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    setError(null)
+    setIsLoading(true)
+    setError("")
 
     try {
-      const user = await loginUser({ username: identifier, password })
+      const user = await login(credentials.username, credentials.password)
       if (user) {
-        window.location.reload() // Success, reload to show the main app
+        onLogin(user)
       } else {
-        setError("Invalid credentials or network issue. Please check console.")
+        setError("Invalid username/email or password")
       }
-    } catch (err) {
-      setError("A critical error occurred.")
-      console.error(err)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "An error occurred during login")
+    } finally {
+      setIsLoading(false)
     }
+  }
 
-    setLoading(false)
+  const handleInputChange = (field: keyof LoginCredentials, value: string) => {
+    setCredentials((prev) => ({ ...prev, [field]: value }))
+    if (error) setError("")
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LogIn className="h-5 w-5" /> Sign In
-          </CardTitle>
-          <CardDescription>Use your username or e-mail and password.</CardDescription>
+        <CardHeader className="text-center">
+          <CardTitle className="text-2xl font-bold">Welcome Back</CardTitle>
+          <CardDescription>Sign in to your Payment Processing Proposal Generator account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1">
-              <Label htmlFor="identifier">Username or E-mail</Label>
+            <div>
+              <Label htmlFor="username">Username or Email</Label>
               <Input
-                id="identifier"
+                id="username"
                 type="text"
-                autoComplete="username"
+                value={credentials.username}
+                onChange={(e) => handleInputChange("username", e.target.value)}
+                placeholder="Enter your username or email"
                 required
-                disabled={loading}
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
               />
             </div>
 
-            <div className="space-y-1">
+            <div>
               <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Input
                   id="password"
-                  type={showPw ? "text" : "password"}
-                  autoComplete="current-password"
+                  type={showPassword ? "text" : "password"}
+                  value={credentials.password}
+                  onChange={(e) => handleInputChange("password", e.target.value)}
+                  placeholder="Enter your password"
                   required
-                  disabled={loading}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
                 />
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8"
-                  onClick={() => setShowPw((s) => !s)}
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
                 >
-                  {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
@@ -90,14 +99,35 @@ export function LoginForm() {
               </Alert>
             )}
 
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Signing in…" : "Sign In"}
+            <Button type="submit" className="w-full" disabled={isLoading}>
+              {isLoading ? (
+                "Signing in..."
+              ) : (
+                <>
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Sign In
+                </>
+              )}
             </Button>
           </form>
+
+          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
+            <h4 className="font-semibold text-blue-900 mb-2">Default Admin Credentials:</h4>
+            <div className="text-sm text-blue-800 space-y-1">
+              <div>
+                <strong>Username:</strong> admin
+              </div>
+              <div>
+                <strong>Email:</strong> admin@transferglobal.com
+              </div>
+              <div>
+                <strong>Password:</strong> Admin123!
+              </div>
+            </div>
+            <p className="text-xs text-blue-600 mt-2">Use these credentials to log in and create additional users.</p>
+          </div>
         </CardContent>
       </Card>
-    </main>
+    </div>
   )
 }
-
-export default LoginForm

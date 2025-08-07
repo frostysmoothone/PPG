@@ -1,57 +1,172 @@
-import type { SavedProposal, ProposalData } from "../types/proposal"
+import { supabase } from '../lib/supabase'
+import { getCurrentUser } from './auth'
+import type { ProposalData } from '../types/proposal'
 
-const STORAGE_KEY = "saved-proposals"
+export interface SavedProposal {
+  id: string
+  name: string
+  data: ProposalData
+  user_id: string
+  created_at: string
+  updated_at: string
+}
 
-export function getSavedProposals(): SavedProposal[] {
-  if (typeof window === "undefined") return []
-
+export async function getSavedProposals(): Promise<SavedProposal[]> {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
+    const currentUser = getCurrentUser()
+    if (!currentUser) {
+      throw new Error('User not authenticated')
+    }
+
+    const { data, error } = await supabase
+      .from('proposals')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('updated_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching proposals:', error)
+      throw new Error(`Failed to fetch proposals: ${error.message}`)
+    }
+
+    return data || []
   } catch (error) {
-    console.error("Error loading saved proposals:", error)
-    return []
+    console.error('Error in getSavedProposals:', error)
+    throw error
   }
 }
 
-export function saveProposal(name: string, data: ProposalData, id?: string): SavedProposal {
-  const proposals = getSavedProposals()
-  const now = new Date().toISOString()
+export async function saveProposal(
+  name: string, 
+  data: ProposalData, 
+  id?: string
+): Promise<SavedProposal> {
+  try {
+    const currentUser = getCurrentUser()
+    if (!currentUser) {
+      throw new Error('User not authenticated')
+    }
 
-  if (id) {
-    // Update existing proposal
-    const index = proposals.findIndex((p) => p.id === id)
-    if (index !== -1) {
-      proposals[index] = {
-        ...proposals[index],
-        name,
-        data,
-        updatedAt: now,
+    if (id) {
+      // Update existing proposal
+      const { data: updated, error } = await supabase
+        .from('proposals')
+        .update({
+          name,
+          data,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .eq('user_id', currentUser.id)
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error updating proposal:', error)
+        throw new Error(`Failed to update proposal: ${error.message}`)
       }
+
+      return updated
+    } else {
+      // Create new proposal
+      const { data: created, error } = await supabase
+        .from('proposals')
+        .insert([{
+          name,
+          data,
+          user_id: currentUser.id
+        }])
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error creating proposal:', error)
+        throw new Error(`Failed to save proposal: ${error.message}`)
+      }
+
+      return created
     }
-  } else {
-    // Create new proposal
-    const newProposal: SavedProposal = {
-      id: crypto.randomUUID(),
-      name,
-      data,
-      createdAt: now,
-      updatedAt: now,
-    }
-    proposals.push(newProposal)
+  } catch (error) {
+    console.error('Error in saveProposal:', error)
+    throw error
   }
-
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(proposals))
-  return proposals.find((p) => p.id === id) || proposals[proposals.length - 1]
 }
 
-export function deleteProposal(id: string): void {
-  const proposals = getSavedProposals()
-  const filtered = proposals.filter((p) => p.id !== id)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered))
+export async function updateProposal(id: string, updates: Partial<SavedProposal>): Promise<SavedProposal> {
+  try {
+    const currentUser = getCurrentUser()
+    if (!currentUser) {
+      throw new Error('User not authenticated')
+    }
+
+    const { data, error } = await supabase
+      .from('proposals')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
+      .eq('user_id', currentUser.id)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error updating proposal:', error)
+      throw error
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error in updateProposal:', error)
+    throw error
+  }
 }
 
-export function getProposalById(id: string): SavedProposal | null {
-  const proposals = getSavedProposals()
-  return proposals.find((p) => p.id === id) || null
+export async function deleteProposal(id: string): Promise<void> {
+  try {
+    const currentUser = getCurrentUser()
+    if (!currentUser) {
+      throw new Error('User not authenticated')
+    }
+
+    const { error } = await supabase
+      .from('proposals')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', currentUser.id)
+
+    if (error) {
+      console.error('Error deleting proposal:', error)
+      throw error
+    }
+  } catch (error) {
+    console.error('Error in deleteProposal:', error)
+    throw error
+  }
+}
+
+export async function loadProposal(id: string): Promise<SavedProposal> {
+  try {
+    const currentUser = getCurrentUser()
+    if (!currentUser) {
+      throw new Error('User not authenticated')
+    }
+
+    const { data, error } = await supabase
+      .from('proposals')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', currentUser.id)
+      .single()
+
+    if (error) {
+      console.error('Error loading proposal:', error)
+      throw error
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error in loadProposal:', error)
+    throw error
+  }
 }

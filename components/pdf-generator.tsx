@@ -1,23 +1,14 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Button } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Download, Save, FolderOpen, Plus, Eye } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
 import { FeeTable } from "./fee-table"
 import { AdditionalFeesTable } from "./additional-fees-table"
 import { SettlementSection } from "./settlement-section"
@@ -25,499 +16,377 @@ import { PDFPreview } from "./pdf-preview"
 import { SaveProposalDialog } from "./save-proposal-dialog"
 import { SavedProposalsDialog } from "./saved-proposals-dialog"
 import { generatePDF } from "../utils/pdf-generator"
-import type { ProposalData, SavedProposal } from "../types/proposal"
-import { getCurrentUser } from "../utils/supabase-auth"
-import { saveProposal, getProposals, updateProposal, deleteProposal } from "../utils/supabase-proposals"
-import {
-  getCompanyDefaults,
-  getDefaultCardFees,
-  getDefaultAdditionalFees,
-  getDefaultSettlementTerms,
-} from "../utils/supabase-settings"
+import { getSavedProposals, saveProposal, deleteProposal } from "../utils/proposal-storage"
+import { getDefaultProposalData } from "../utils/system-settings"
+import type { ProposalData, CardFee, AdditionalFee, SavedProposal } from "../types/proposal"
+import { FileText, Eye, EyeOff, RotateCcw } from 'lucide-react'
+import { useToast } from "@/hooks/use-toast"
 
 export default function PDFGenerator() {
-  const [currentUser, setCurrentUser] = useState<any>(null)
-  const [currentProposal, setCurrentProposal] = useState<SavedProposal | null>(null)
-  const [isPreviewOpen, setIsPreviewOpen] = useState(false)
-  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false)
-  const [isSavedProposalsDialogOpen, setIsSavedProposalsDialogOpen] = useState(false)
-  const [savedProposals, setSavedProposals] = useState<SavedProposal[]>([])
+  const [showPreview, setShowPreview] = useState(false)
+  const [logoDataUrl, setLogoDataUrl] = useState<string>("")
+  const [proposalData, setProposalData] = useState<ProposalData | null>(null)
+  const [currentProposalId, setCurrentProposalId] = useState<string | null>(null)
+  const [currentProposalName, setCurrentProposalName] = useState<string>("")
+  const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
 
-  const [proposalData, setProposalData] = useState<ProposalData>({
-    // Company Information
-    companyName: "",
-    companyAddress: "",
-    companyPhone: "",
-    companyEmail: "",
-    companyLogo: "",
-
-    // Client Information
-    clientName: "",
-    clientAddress: "",
-    clientPhone: "",
-    clientEmail: "",
-    clientWebsite: "",
-
-    // Business Information
-    businessType: "",
-    monthlyVolume: 0,
-    averageTicket: 0,
-    highestTicket: 0,
-
-    // Fee Structure
-    cardFees: [],
-    additionalFees: [],
-
-    // Settlement Information
-    settlementPeriod: "",
-    settlementFee: 0,
-    settlementCurrency: "USD",
-    minimumSettlement: 0,
-
-    // Additional Information
-    notes: "",
-    validUntil: "",
-  })
-
+  // Initialize component with proper defaults
   useEffect(() => {
-    const initializeData = async () => {
-      const user = await getCurrentUser()
-      setCurrentUser(user)
-
-      if (user) {
-        await loadSavedProposals()
-        await loadDefaultSettings()
+    const initializeComponent = async () => {
+      try {
+        // Get default proposal data
+        const defaultData = getDefaultProposalData()
+        setProposalData(defaultData)
+        
+        // Convert default logo to data URL
+        try {
+          const response = await fetch("/linx-logo.png")
+          const blob = await response.blob()
+          const reader = new FileReader()
+          reader.onload = () => {
+            const dataUrl = reader.result as string
+            setLogoDataUrl(dataUrl)
+            setProposalData((prev) => prev ? { ...prev, companyLogo: dataUrl } : null)
+          }
+          reader.readAsDataURL(blob)
+        } catch (error) {
+          console.error("Failed to load default logo:", error)
+        }
+      } catch (error) {
+        console.error("Failed to initialize component:", error)
+        // Use fallback data if system defaults fail
+        setProposalData(getDefaultProposalData())
+      } finally {
+        setIsLoading(false)
       }
     }
-    initializeData()
+
+    initializeComponent()
   }, [])
 
-  const loadDefaultSettings = async () => {
-    try {
-      const [companyDefaults, cardFees, additionalFees, settlementTerms] = await Promise.all([
-        getCompanyDefaults(),
-        getDefaultCardFees(),
-        getDefaultAdditionalFees(),
-        getDefaultSettlementTerms(),
-      ])
-
-      setProposalData((prev) => ({
-        ...prev,
-        companyName: companyDefaults.companyName || "",
-        companyAddress: companyDefaults.companyAddress || "",
-        companyPhone: companyDefaults.companyPhone || "",
-        companyEmail: companyDefaults.companyEmail || "",
-        companyLogo: companyDefaults.companyLogo || "",
-        cardFees: cardFees || [],
-        additionalFees: additionalFees || [],
-        settlementPeriod: settlementTerms.settlementPeriod || "",
-        settlementFee: settlementTerms.settlementFee || 0,
-        settlementCurrency: settlementTerms.settlementCurrency || "USD",
-        minimumSettlement: settlementTerms.minimumSettlement || 0,
-      }))
-    } catch (error) {
-      console.error("Error loading default settings:", error)
-    }
+  const handleCompanyInfoChange = (field: keyof ProposalData, value: string) => {
+    if (!proposalData) return
+    setProposalData((prev) => prev ? { ...prev, [field]: value } : null)
   }
 
-  const loadSavedProposals = async () => {
-    if (!currentUser) return
-
-    try {
-      const proposals = await getProposals(currentUser.id)
-      setSavedProposals(proposals)
-    } catch (error) {
-      console.error("Error loading saved proposals:", error)
+  const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file && proposalData) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string
+        setLogoDataUrl(dataUrl)
+        setProposalData((prev) => prev ? { ...prev, companyLogo: dataUrl } : null)
+      }
+      reader.readAsDataURL(file)
     }
   }
 
   const handleSaveProposal = async (name: string) => {
-    if (!currentUser) return
-
+    if (!proposalData) return
+    
     try {
-      let savedProposal: SavedProposal | null = null
-
-      if (currentProposal) {
-        // Update existing proposal
-        savedProposal = await updateProposal(currentProposal.id, name, proposalData)
-        if (savedProposal) {
-          setCurrentProposal(savedProposal)
-          setSavedProposals((prev) => prev.map((p) => (p.id === savedProposal!.id ? savedProposal! : p)))
-        }
-      } else {
-        // Create new proposal
-        savedProposal = await saveProposal(currentUser.id, name, proposalData)
-        if (savedProposal) {
-          setCurrentProposal(savedProposal)
-          setSavedProposals((prev) => [savedProposal!, ...prev])
-        }
-      }
-
-      if (savedProposal) {
-        toast({
-          title: "Success",
-          description: `Proposal ${currentProposal ? "updated" : "saved"} successfully`,
-        })
-        setIsSaveDialogOpen(false)
-      } else {
-        toast({
-          title: "Error",
-          description: `Failed to ${currentProposal ? "update" : "save"} proposal`,
-          variant: "destructive",
-        })
-      }
+      const saved = await saveProposal(name, proposalData, currentProposalId || undefined)
+      setCurrentProposalId(saved.id)
+      setCurrentProposalName(saved.name)
+      toast({
+        title: "Proposal Saved",
+        description: `"${name}" has been saved successfully.`,
+      })
     } catch (error) {
+      console.error("Save proposal error:", error)
       toast({
         title: "Error",
-        description: `Failed to ${currentProposal ? "update" : "save"} proposal`,
+        description: error instanceof Error ? error.message : "Failed to save proposal. Please try again.",
         variant: "destructive",
       })
     }
   }
 
   const handleLoadProposal = (proposal: SavedProposal) => {
-    setProposalData(proposal.data)
-    setCurrentProposal(proposal)
-    setIsSavedProposalsDialogOpen(false)
-    toast({
-      title: "Success",
-      description: `Loaded proposal: ${proposal.name}`,
-    })
-  }
-
-  const handleDeleteProposal = async (proposalId: string) => {
-    try {
-      const success = await deleteProposal(proposalId)
-      if (success) {
-        setSavedProposals((prev) => prev.filter((p) => p.id !== proposalId))
-        if (currentProposal?.id === proposalId) {
-          setCurrentProposal(null)
-        }
-        toast({
-          title: "Success",
-          description: "Proposal deleted successfully",
-        })
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to delete proposal",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to delete proposal",
-        variant: "destructive",
-      })
+    // Ensure all fields have proper values when loading
+    const loadedData: ProposalData = {
+      ...getDefaultProposalData(),
+      ...proposal.data,
+      // Ensure no undefined values
+      companyName: proposal.data.companyName || "",
+      companyAddress: proposal.data.companyAddress || "",
+      companyPhone: proposal.data.companyPhone || "",
+      companyEmail: proposal.data.companyEmail || "",
+      clientName: proposal.data.clientName || "",
+      clientCompany: proposal.data.clientCompany || "",
+      clientAddress: proposal.data.clientAddress || "",
+      clientEmail: proposal.data.clientEmail || "",
+      cardFees: proposal.data.cardFees || [],
+      additionalFees: proposal.data.additionalFees || [],
+      settlementTerms: proposal.data.settlementTerms || {
+        settlementPeriod: "T+2 Business Days",
+        settlementFee: 0,
+        settlementCurrency: "USD",
+        minimumSettlement: 0,
+      },
     }
+    
+    setProposalData(loadedData)
+    setCurrentProposalId(proposal.id)
+    setCurrentProposalName(proposal.name)
+    if (proposal.data.companyLogo) {
+      setLogoDataUrl(proposal.data.companyLogo)
+    }
+    toast({
+      title: "Proposal Loaded",
+      description: `"${proposal.name}" has been loaded.`,
+    })
   }
 
   const handleNewProposal = async () => {
-    setCurrentProposal(null)
-    await loadDefaultSettings()
-    toast({
-      title: "New Proposal",
-      description: "Started a new proposal with default settings",
-    })
-  }
-
-  const handleGeneratePDF = async () => {
     try {
-      await generatePDF(proposalData)
+      const defaultData = getDefaultProposalData()
+      setProposalData(defaultData)
+      setCurrentProposalId(null)
+      setCurrentProposalName("")
+      
+      // Reset logo to default
+      if (logoDataUrl && logoDataUrl.startsWith("data:")) {
+        setProposalData((prev) => prev ? { ...prev, companyLogo: logoDataUrl } : null)
+      }
+      
       toast({
-        title: "Success",
-        description: "PDF generated successfully",
+        title: "New Proposal",
+        description: "Started a new proposal.",
       })
     } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to generate PDF",
-        variant: "destructive",
-      })
+      console.error("New proposal error:", error)
+      setProposalData(getDefaultProposalData())
     }
   }
 
+  const handleGeneratePDF = () => {
+    if (!proposalData) return
+    generatePDF(proposalData)
+  }
+
+  // Show loading state while initializing
+  if (isLoading || !proposalData) {
+    return (
+      <div className="min-h-screen bg-gray-50 p-4 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Header with Actions */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Proposal Generator</h2>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-muted-foreground">
-              {currentProposal ? `Editing: ${currentProposal.name}` : "New Proposal"}
-            </p>
-            {currentProposal && <Badge variant="secondary">Saved</Badge>}
+    <div className="min-h-screen bg-gray-50 p-4">
+      <div className="mx-auto">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Payment Processing Proposal Generator</h1>
+            <p className="text-gray-600">Create professional pricing proposals for payment processing services</p>
+            {currentProposalName && (
+              <p className="text-sm text-blue-600 mt-1">Currently editing: {currentProposalName}</p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleNewProposal} className="flex items-center gap-2 bg-transparent">
+              <RotateCcw className="h-4 w-4" />
+              New
+            </Button>
+            <SavedProposalsDialog onLoadProposal={handleLoadProposal} />
+            <SaveProposalDialog
+              proposalData={proposalData}
+              onSave={handleSaveProposal}
+              currentName={currentProposalName}
+              isEditing={!!currentProposalId}
+            />
+            <Button variant="outline" onClick={() => setShowPreview(!showPreview)} className="flex items-center gap-2">
+              {showPreview ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {showPreview ? "Hide Preview" : "Show Preview"}
+            </Button>
+            <Button onClick={handleGeneratePDF} className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Generate PDF
+            </Button>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={handleNewProposal}>
-            <Plus className="h-4 w-4 mr-2" />
-            New
-          </Button>
-          <SavedProposalsDialog
-            proposals={savedProposals}
-            onLoad={handleLoadProposal}
-            onDelete={handleDeleteProposal}
-            trigger={
-              <Button variant="outline">
-                <FolderOpen className="h-4 w-4 mr-2" />
-                Load ({savedProposals.length})
-              </Button>
-            }
-            open={isSavedProposalsDialogOpen}
-            onOpenChange={setIsSavedProposalsDialogOpen}
-          />
-          <SaveProposalDialog
-            onSave={handleSaveProposal}
-            currentName={currentProposal?.name || ""}
-            isUpdate={!!currentProposal}
-            trigger={
-              <Button variant="outline">
-                <Save className="h-4 w-4 mr-2" />
-                Save
-              </Button>
-            }
-            open={isSaveDialogOpen}
-            onOpenChange={setIsSaveDialogOpen}
-          />
-          <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline">
-                <Eye className="h-4 w-4 mr-2" />
-                Preview
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>PDF Preview</DialogTitle>
-                <DialogDescription>Preview of the generated proposal</DialogDescription>
-              </DialogHeader>
-              <PDFPreview data={proposalData} />
-            </DialogContent>
-          </Dialog>
-          <Button onClick={handleGeneratePDF}>
-            <Download className="h-4 w-4 mr-2" />
-            Generate PDF
-          </Button>
+
+        <div className={`grid gap-6 ${showPreview ? "lg:grid-cols-2" : "grid-cols-1"}`}>
+          {/* Form Section */}
+          <div className={showPreview ? "" : "max-w-4xl mx-auto w-full"}>
+            <Tabs defaultValue="company" className="space-y-4">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="company">Company</TabsTrigger>
+                <TabsTrigger value="client">Client</TabsTrigger>
+                <TabsTrigger value="fees">Fees</TabsTrigger>
+                <TabsTrigger value="settlement">Settlement</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="company" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Company Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <Label htmlFor="logo">Company Logo</Label>
+                      <Input id="logo" type="file" accept="image/*" onChange={handleLogoUpload} className="mt-1" />
+                      {logoDataUrl && (
+                        <div className="mt-2">
+                          <img
+                            src={logoDataUrl || "/placeholder.svg"}
+                            alt="Company Logo"
+                            className="h-12 object-contain"
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="companyName">Company Name</Label>
+                        <Input
+                          id="companyName"
+                          value={proposalData.companyName || ""}
+                          onChange={(e) => handleCompanyInfoChange("companyName", e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="companyPhone">Phone</Label>
+                        <Input
+                          id="companyPhone"
+                          value={proposalData.companyPhone || ""}
+                          onChange={(e) => handleCompanyInfoChange("companyPhone", e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="companyAddress">Address</Label>
+                      <Textarea
+                        id="companyAddress"
+                        value={proposalData.companyAddress || ""}
+                        onChange={(e) => handleCompanyInfoChange("companyAddress", e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="companyEmail">Email</Label>
+                      <Input
+                        id="companyEmail"
+                        type="email"
+                        value={proposalData.companyEmail || ""}
+                        onChange={(e) => handleCompanyInfoChange("companyEmail", e.target.value)}
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="client" className="space-y-4">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Client Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="clientName">Client Name</Label>
+                        <Input
+                          id="clientName"
+                          value={proposalData.clientName || ""}
+                          onChange={(e) => handleCompanyInfoChange("clientName", e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="clientCompany">Company</Label>
+                        <Input
+                          id="clientCompany"
+                          value={proposalData.clientCompany || ""}
+                          onChange={(e) => handleCompanyInfoChange("clientCompany", e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <Label htmlFor="clientAddress">Address</Label>
+                      <Textarea
+                        id="clientAddress"
+                        value={proposalData.clientAddress || ""}
+                        onChange={(e) => handleCompanyInfoChange("clientAddress", e.target.value)}
+                        rows={3}
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="clientEmail">Email</Label>
+                      <Input
+                        id="clientEmail"
+                        type="email"
+                        value={proposalData.clientEmail || ""}
+                        onChange={(e) => handleCompanyInfoChange("clientEmail", e.target.value)}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <Label htmlFor="proposalDate">Proposal Date</Label>
+                        <Input
+                          id="proposalDate"
+                          type="date"
+                          value={proposalData.proposalDate || ""}
+                          onChange={(e) => handleCompanyInfoChange("proposalDate", e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="validUntil">Valid Until</Label>
+                        <Input
+                          id="validUntil"
+                          type="date"
+                          value={proposalData.validUntil || ""}
+                          onChange={(e) => handleCompanyInfoChange("validUntil", e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="fees" className="space-y-4">
+                <FeeTable
+                  cardFees={proposalData.cardFees || []}
+                  onChange={(cardFees) => setProposalData((prev) => prev ? { ...prev, cardFees } : null)}
+                />
+                <AdditionalFeesTable
+                  additionalFees={proposalData.additionalFees || []}
+                  onChange={(additionalFees) => setProposalData((prev) => prev ? { ...prev, additionalFees } : null)}
+                />
+              </TabsContent>
+
+              <TabsContent value="settlement" className="space-y-4">
+                <SettlementSection
+                  settlementTerms={proposalData.settlementTerms || {
+                    settlementPeriod: "T+2 Business Days",
+                    settlementFee: 0,
+                    settlementCurrency: "USD",
+                    minimumSettlement: 0,
+                  }}
+                  onChange={(settlementTerms) => setProposalData((prev) => prev ? { ...prev, settlementTerms } : null)}
+                />
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* Preview Section */}
+          {showPreview && (
+            <div className="lg:sticky lg:top-4 lg:h-fit">
+              <PDFPreview proposalData={proposalData} />
+            </div>
+          )}
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Company Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Company Information</CardTitle>
-            <CardDescription>Your company details for the proposal</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="companyName">Company Name</Label>
-              <Input
-                id="companyName"
-                value={proposalData.companyName}
-                onChange={(e) => setProposalData({ ...proposalData, companyName: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="companyAddress">Address</Label>
-              <Textarea
-                id="companyAddress"
-                value={proposalData.companyAddress}
-                onChange={(e) => setProposalData({ ...proposalData, companyAddress: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="companyPhone">Phone</Label>
-                <Input
-                  id="companyPhone"
-                  value={proposalData.companyPhone}
-                  onChange={(e) => setProposalData({ ...proposalData, companyPhone: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="companyEmail">Email</Label>
-                <Input
-                  id="companyEmail"
-                  type="email"
-                  value={proposalData.companyEmail}
-                  onChange={(e) => setProposalData({ ...proposalData, companyEmail: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="companyLogo">Logo Path</Label>
-              <Input
-                id="companyLogo"
-                value={proposalData.companyLogo}
-                onChange={(e) => setProposalData({ ...proposalData, companyLogo: e.target.value })}
-                placeholder="/path/to/logo.png"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Client Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Client Information</CardTitle>
-            <CardDescription>Details about the client receiving this proposal</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="clientName">Client Name</Label>
-              <Input
-                id="clientName"
-                value={proposalData.clientName}
-                onChange={(e) => setProposalData({ ...proposalData, clientName: e.target.value })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress">Address</Label>
-              <Textarea
-                id="clientAddress"
-                value={proposalData.clientAddress}
-                onChange={(e) => setProposalData({ ...proposalData, clientAddress: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="clientPhone">Phone</Label>
-                <Input
-                  id="clientPhone"
-                  value={proposalData.clientPhone}
-                  onChange={(e) => setProposalData({ ...proposalData, clientPhone: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="clientEmail">Email</Label>
-                <Input
-                  id="clientEmail"
-                  type="email"
-                  value={proposalData.clientEmail}
-                  onChange={(e) => setProposalData({ ...proposalData, clientEmail: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientWebsite">Website</Label>
-              <Input
-                id="clientWebsite"
-                value={proposalData.clientWebsite}
-                onChange={(e) => setProposalData({ ...proposalData, clientWebsite: e.target.value })}
-                placeholder="https://example.com"
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Business Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Business Information</CardTitle>
-            <CardDescription>Business details and transaction volumes</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="businessType">Business Type</Label>
-              <Input
-                id="businessType"
-                value={proposalData.businessType}
-                onChange={(e) => setProposalData({ ...proposalData, businessType: e.target.value })}
-                placeholder="e.g., E-commerce, Retail, Restaurant"
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="monthlyVolume">Monthly Volume ($)</Label>
-                <Input
-                  id="monthlyVolume"
-                  type="number"
-                  value={proposalData.monthlyVolume}
-                  onChange={(e) =>
-                    setProposalData({ ...proposalData, monthlyVolume: Number.parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="averageTicket">Average Ticket ($)</Label>
-                <Input
-                  id="averageTicket"
-                  type="number"
-                  value={proposalData.averageTicket}
-                  onChange={(e) =>
-                    setProposalData({ ...proposalData, averageTicket: Number.parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="highestTicket">Highest Ticket ($)</Label>
-                <Input
-                  id="highestTicket"
-                  type="number"
-                  value={proposalData.highestTicket}
-                  onChange={(e) =>
-                    setProposalData({ ...proposalData, highestTicket: Number.parseFloat(e.target.value) || 0 })
-                  }
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Additional Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Additional Information</CardTitle>
-            <CardDescription>Notes and proposal validity</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={proposalData.notes}
-                onChange={(e) => setProposalData({ ...proposalData, notes: e.target.value })}
-                placeholder="Additional terms, conditions, or notes..."
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="validUntil">Valid Until</Label>
-              <Input
-                id="validUntil"
-                type="date"
-                value={proposalData.validUntil}
-                onChange={(e) => setProposalData({ ...proposalData, validUntil: e.target.value })}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Separator />
-
-      {/* Fee Tables */}
-      <div className="space-y-6">
-        <FeeTable
-          fees={proposalData.cardFees}
-          onFeesChange={(fees) => setProposalData({ ...proposalData, cardFees: fees })}
-        />
-
-        <AdditionalFeesTable
-          fees={proposalData.additionalFees}
-          onFeesChange={(fees) => setProposalData({ ...proposalData, additionalFees: fees })}
-        />
-
-        <SettlementSection
-          settlementPeriod={proposalData.settlementPeriod}
-          settlementFee={proposalData.settlementFee}
-          settlementCurrency={proposalData.settlementCurrency}
-          minimumSettlement={proposalData.minimumSettlement}
-          onSettlementChange={(field, value) => setProposalData({ ...proposalData, [field]: value })}
-        />
       </div>
     </div>
   )

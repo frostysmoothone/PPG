@@ -1,149 +1,288 @@
-import type { User, LoginCredentials, CreateUserData } from "../types/user"
+import bcrypt from 'bcryptjs'
+import { supabase } from '../lib/supabase'
 
-const USERS_STORAGE_KEY = "app-users"
-const AUTH_STORAGE_KEY = "current-user"
-
-// Default admin user credentials
-const DEFAULT_ADMIN: User = {
-  id: "admin-001",
-  username: "admin",
-  email: "admin@transferglobal.com",
-  password: "Admin123!", // In production, this would be hashed
-  role: "admin",
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  isActive: true,
+export interface User {
+  id: string
+  username: string
+  email: string
+  role: 'admin' | 'user'
+  created_at: string
+  updated_at: string
 }
 
-export function initializeUsers(): void {
-  if (typeof window === "undefined") return
+// In-memory session storage
+let currentUserSession: User | null = null
 
-  const existingUsers = getUsers()
-  if (existingUsers.length === 0) {
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify([DEFAULT_ADMIN]))
+export async function login(usernameOrEmail: string, password: string): Promise<User> {
+  try {
+    console.log('Attempting login for:', usernameOrEmail)
+    
+    // Query the users table by username OR email
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('*')
+      .or(`username.eq.${usernameOrEmail},email.eq.${usernameOrEmail}`)
+    
+    if (error) {
+      console.error('Database error during login:', error.message)
+      throw new Error('Database connection failed')
+    }
+
+    if (!users || users.length === 0) {
+      console.log('No user found with username/email:', usernameOrEmail)
+      throw new Error('Invalid username or password')
+    }
+
+    const user = users[0]
+    console.log('User found:', { id: user.id, username: user.username, password_hash: user.password_hash })
+
+    // Check password - support both bcrypt and plain text for development
+    let passwordValid = false
+    
+    try {
+      // Try bcrypt first (check if it looks like a bcrypt hash)
+      if (user.password_hash && user.password_hash.startsWith('$2')) {
+        passwordValid = await bcrypt.compare(password, user.password_hash)
+        console.log('Bcrypt comparison result:', passwordValid)
+      } else {
+        // Plain text comparison for development
+        passwordValid = password === user.password_hash
+        console.log('Plain text comparison result:', passwordValid, 'Expected:', user.password_hash, 'Provided:', password)
+      }
+    } catch (bcryptError) {
+      console.log('Bcrypt error, falling back to plain text:', bcryptError)
+      // Fallback to plain text comparison
+      passwordValid = password === user.password_hash
+    }
+
+    if (!passwordValid) {
+      console.log('Invalid password for user:', usernameOrEmail)
+      throw new Error('Invalid username or password')
+    }
+
+    // Create user session object
+    const userSession: User = {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      created_at: user.created_at,
+      updated_at: user.updated_at
+    }
+
+    // Store session
+    currentUserSession = userSession
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('currentUser', JSON.stringify(userSession))
+    }
+    
+    console.log('Login successful for user:', usernameOrEmail)
+    return userSession
+  } catch (error) {
+    console.error('Login error:', error)
+    throw error
   }
 }
 
-export function getUsers(): User[] {
-  if (typeof window === "undefined") return []
+export function logout(): void {
+  currentUserSession = null
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('currentUser')
+  }
+  console.log('User logged out')
+}
 
+export function getCurrentUser(): User | null {
+  // Try in-memory first
+  if (currentUserSession) {
+    return currentUserSession
+  }
+  
+  // Fallback to localStorage (only in browser)
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('currentUser')
+      if (stored) {
+        const user = JSON.parse(stored) as User
+        currentUserSession = user
+        return user
+      }
+    } catch (error) {
+      console.error('Error parsing stored user:', error)
+      localStorage.removeItem('currentUser')
+    }
+  }
+  
+  return null
+}
+
+export async function getUsers(): Promise<User[]> {
   try {
-    const stored = localStorage.getItem(USERS_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, username, email, role, created_at, updated_at')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching users:', error)
+      return []
+    }
+
+    return data || []
   } catch (error) {
-    console.error("Error loading users:", error)
+    console.error('Error in getUsers:', error)
     return []
   }
 }
 
-export function saveUsers(users: User[]): void {
-  if (typeof window === "undefined") return
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users))
-}
-
-export function login(credentials: LoginCredentials): User | null {
-  const users = getUsers()
-  const user = users.find(
-    (u) =>
-      (u.username === credentials.username || u.email === credentials.username) &&
-      u.password === credentials.password &&
-      u.isActive,
-  )
-
-  if (user) {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user))
-    return user
-  }
-
-  return null
-}
-
-export function logout(): void {
-  if (typeof window === "undefined") return
-  localStorage.removeItem(AUTH_STORAGE_KEY)
-}
-
-export function getCurrentUser(): User | null {
-  if (typeof window === "undefined") return null
-
+export async function createUser(userData: {
+  username: string
+  email: string
+  password: string
+  role: 'admin' | 'user'
+}): Promise<User | null> {
   try {
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : null
+    // Hash password
+    const hashedPassword = await bcrypt.hash(userData.password, 10)
+    
+    const { data, error } = await supabase
+      .from('users')
+      .insert([{
+        username: userData.username,
+        email: userData.email,
+        password_hash: hashedPassword,
+        role: userData.role
+      }])
+      .select('id, username, email, role, created_at, updated_at')
+      .single()
+
+    if (error) {
+      console.error('Error creating user:', error)
+      throw error
+    }
+
+    return data
   } catch (error) {
-    console.error("Error loading current user:", error)
-    return null
+    console.error('Error in createUser:', error)
+    throw error
   }
 }
 
-export function createUser(userData: CreateUserData): User | null {
-  const users = getUsers()
+export async function updateUser(id: string, updates: Partial<User & { password?: string }>): Promise<User | null> {
+  try {
+    const updateData: any = {}
+    
+    if (updates.username) updateData.username = updates.username
+    if (updates.email) updateData.email = updates.email
+    if (updates.role) updateData.role = updates.role
+    
+    // Hash password if provided
+    if (updates.password) {
+      updateData.password_hash = await bcrypt.hash(updates.password, 10)
+    }
+    
+    const { data, error } = await supabase
+      .from('users')
+      .update(updateData)
+      .eq('id', id)
+      .select('id, username, email, role, created_at, updated_at')
+      .single()
 
-  // Check if username or email already exists
-  if (users.some((u) => u.username === userData.username || u.email === userData.email)) {
-    return null
+    if (error) {
+      console.error('Error updating user:', error)
+      throw error
+    }
+
+    return data
+  } catch (error) {
+    console.error('Error in updateUser:', error)
+    throw error
   }
-
-  const newUser: User = {
-    id: crypto.randomUUID(),
-    ...userData,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    isActive: true,
-  }
-
-  users.push(newUser)
-  saveUsers(users)
-  return newUser
 }
 
-export function updateUser(userId: string, updates: Partial<User>): User | null {
-  const users = getUsers()
-  const userIndex = users.findIndex((u) => u.id === userId)
+export async function deleteUser(id: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id)
 
-  if (userIndex === -1) return null
-
-  users[userIndex] = {
-    ...users[userIndex],
-    ...updates,
-    updatedAt: new Date().toISOString(),
+    if (error) {
+      console.error('Error deleting user:', error)
+      return false
+    }
+    
+    return true
+  } catch (error) {
+    console.error('Error in deleteUser:', error)
+    return false
   }
-
-  saveUsers(users)
-  return users[userIndex]
 }
 
-export function deleteUser(userId: string): boolean {
-  const users = getUsers()
-  const filteredUsers = users.filter((u) => u.id !== userId)
-
-  if (filteredUsers.length === users.length) return false
-
-  saveUsers(filteredUsers)
-  return true
-}
-
-export function validatePassword(password: string): string[] {
+export function validatePassword(password: string): { isValid: boolean; errors: string[] } {
   const errors: string[] = []
 
   if (password.length < 8) {
-    errors.push("Password must be at least 8 characters long")
+    errors.push('Password must be at least 8 characters long')
   }
-
   if (!/[A-Z]/.test(password)) {
-    errors.push("Password must contain at least one uppercase letter")
+    errors.push('Password must contain at least one uppercase letter')
   }
-
   if (!/[a-z]/.test(password)) {
-    errors.push("Password must contain at least one lowercase letter")
+    errors.push('Password must contain at least one lowercase letter')
   }
-
   if (!/\d/.test(password)) {
-    errors.push("Password must contain at least one number")
+    errors.push('Password must contain at least one number')
   }
-
   if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
-    errors.push("Password must contain at least one special character")
+    errors.push('Password must contain at least one special character')
   }
 
-  return errors
+  return {
+    isValid: errors.length === 0,
+    errors
+  }
+}
+
+export async function initializeUsers(): Promise<void> {
+  try {
+    console.log('Checking if admin user exists...')
+    
+    // Check if admin user exists
+    const { data: existingUsers, error } = await supabase
+      .from('users')
+      .select('username, password_hash')
+      .eq('username', 'admin')
+
+    if (error) {
+      console.error('Error checking for admin user:', error)
+      return
+    }
+
+    if (!existingUsers || existingUsers.length === 0) {
+      console.log('Creating default admin user...')
+      
+      // Create default admin user with plain text password for development
+      const { error: insertError } = await supabase
+        .from('users')
+        .insert([{
+          username: 'admin',
+          email: 'admin@transferglobal.com',
+          password_hash: 'Admin123!', // Plain text for development
+          role: 'admin'
+        }])
+
+      if (insertError) {
+        console.error('Error creating default admin user:', insertError)
+      } else {
+        console.log('Default admin user created successfully')
+        console.log('Username: admin')
+        console.log('Password: Admin123!')
+      }
+    } else {
+      console.log('Admin user already exists with password hash:', existingUsers[0].password_hash)
+    }
+  } catch (error) {
+    console.error('Error initializing users:', error)
+  }
 }

@@ -4,15 +4,13 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
-import { LogOut, FileText, Users, UserIcon, Settings } from "lucide-react"
+import { LogOut, FileText, Users, UserIcon } from 'lucide-react'
+import { getCurrentUser, logout, initializeUsers } from "../utils/auth"
 import { LoginForm } from "./login-form"
 import { UserManagement } from "./user-management"
 import PDFGenerator from "./pdf-generator"
 import type { User } from "../types/user"
 import { useToast } from "@/hooks/use-toast"
-import { SettingsManagement } from "./settings-management"
-import { loginUser, logoutUser, getCurrentUser } from "../utils/supabase-auth"
-import type { LoginCredentials } from "../types/auth"
 
 export default function AppLayout() {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
@@ -20,29 +18,40 @@ export default function AppLayout() {
   const { toast } = useToast()
 
   useEffect(() => {
-    const initApp = async () => {
-      const user = await getCurrentUser()
-      setCurrentUser(user)
-      setIsLoading(false)
+    const initializeApp = async () => {
+      try {
+        await initializeUsers()
+        const user = getCurrentUser()
+        setCurrentUser(user)
+        
+        if (user) {
+          console.log('User authenticated:', user.username)
+        } else {
+          console.log('No authenticated user found')
+        }
+      } catch (error) {
+        console.error('Error initializing app:', error)
+      } finally {
+        setIsLoading(false)
+      }
     }
-    initApp()
+
+    initializeApp()
   }, [])
 
-  const handleLogin = async (credentials: LoginCredentials) => {
-    const user = await loginUser(credentials)
-    if (user) {
-      setCurrentUser(user)
-      toast({
-        title: "Welcome back!",
-        description: `Logged in as ${user.username}`,
-      })
-    }
-    return user
+  const handleLogin = (user: User) => {
+    setCurrentUser(user)
+    console.log('User logged in:', user.username)
+    toast({
+      title: "Welcome back!",
+      description: `Logged in as ${user.username}`,
+    })
   }
 
-  const handleLogout = async () => {
-    await logoutUser()
+  const handleLogout = () => {
+    logout()
     setCurrentUser(null)
+    console.log('User logged out')
     toast({
       title: "Logged out",
       description: "You have been successfully logged out.",
@@ -89,7 +98,7 @@ export default function AppLayout() {
       {/* Main Content */}
       <main className="p-4">
         <Tabs defaultValue="proposals" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 max-w-lg">
+          <TabsList className="grid w-full grid-cols-2 max-w-md">
             <TabsTrigger value="proposals" className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
               Proposals
@@ -98,12 +107,6 @@ export default function AppLayout() {
               <TabsTrigger value="users" className="flex items-center gap-2">
                 <Users className="h-4 w-4" />
                 Users
-              </TabsTrigger>
-            )}
-            {currentUser.role === "admin" && (
-              <TabsTrigger value="settings" className="flex items-center gap-2">
-                <Settings className="h-4 w-4" />
-                Settings
               </TabsTrigger>
             )}
           </TabsList>
@@ -115,11 +118,6 @@ export default function AppLayout() {
           {currentUser.role === "admin" && (
             <TabsContent value="users" className="mt-6">
               <UserManagement currentUser={currentUser} />
-            </TabsContent>
-          )}
-          {currentUser.role === "admin" && (
-            <TabsContent value="settings" className="mt-6">
-              <SettingsManagement currentUser={currentUser} />
             </TabsContent>
           )}
         </Tabs>
