@@ -111,21 +111,7 @@ export function LoginForm({ onLogin }: LoginFormProps) {
             </Button>
           </form>
 
-          <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-            <h4 className="font-semibold text-blue-900 mb-2">Default Admin Credentials:</h4>
-            <div className="text-sm text-blue-800 space-y-1">
-              <div>
-                <strong>Username:</strong> admin
-              </div>
-              <div>
-                <strong>Email:</strong> admin@transferglobal.com
-              </div>
-              <div>
-                <strong>Password:</strong> Admin123!
-              </div>
-            </div>
-            <p className="text-xs text-blue-600 mt-2">Use these credentials to log in and create additional users.</p>
-          </div>
+    
         </CardContent>
       </Card>
     </div>
