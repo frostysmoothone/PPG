@@ -184,8 +184,7 @@ export default function PDFGenerator() {
       <div className="mx-auto">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Payment Processing Proposal Generator</h1>
-            <p className="text-gray-600">Create professional pricing proposals for payment processing services</p>
+         
             {currentProposalName && (
               <p className="text-sm text-blue-600 mt-1">Currently editing: {currentProposalName}</p>
             )}
